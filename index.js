@@ -54,6 +54,12 @@ async function run() {
             // console.log(allCourses);
             res.send({ allCourses })
         })
+        // teacher request Count get api
+        app.get('/api/v1/teacherRequest/Count', async (req, res) => {
+            const allRequest = await teacherRequestCollections.estimatedDocumentCount()
+            // console.log(allCourses);
+            res.send({ allRequest })
+        })
 
         // enrolment count get api
         app.get('/api/v1/enrolmentCount', async (req, res) => {
@@ -89,10 +95,22 @@ async function run() {
 
         // course get api
         app.get('/api/v1/allCourses', async (req, res) => {
-            const allCourses = await allCoursesCollections.find().toArray()
+            const page = parseInt(req.query.page)
+            const size = parseInt(req.query.size)
+            const allCourses = await allCoursesCollections.find()
+                .skip(page * size)
+                .limit(size)
+                .toArray()
             // console.log(allCourses);
             res.send(allCourses)
         })
+
+        // // course get api
+        // app.get('/api/v1/allCourses', async (req, res) => {
+        //     const allCourses = await allCoursesCollections.find().toArray()
+        //     // console.log(allCourses);
+        //     res.send(allCourses)
+        // })
 
         // teacher request get api
         app.get('/api/v1/teacherRequest/:email', async (req, res) => {
@@ -105,7 +123,12 @@ async function run() {
 
         // teacher request get api
         app.get('/api/v1/teacherRequest', async (req, res) => {
-            const allRequest = await teacherRequestCollections.find().toArray()
+            const page = parseInt(req.query.page)
+            const size = parseInt(req.query.size)
+            const allRequest = await teacherRequestCollections.find()
+                .skip(page * size)
+                .limit(size)
+                .toArray()
             // console.log(allRequest);
             res.send(allRequest)
         })
@@ -128,7 +151,17 @@ async function run() {
 
         // users get api
         app.get('/api/v1/getUsers', async (req, res) => {
-            const users = await usersCollections.find().toArray()
+            // const search = req.query.search;
+            // // Check if a name is provided in the query parameters
+            // if (req.query.email) {
+            //     filter.email = { $regex: new RegExp(req.query.name, 'i') }; // Case-insensitive regex for partial matching
+            // }
+            const page = parseInt(req.query.page)
+            const size = parseInt(req.query.size)
+            const users = await usersCollections.find()
+                .skip(page * size)
+                .limit(size)
+                .toArray()
             // console.log(users);
             res.send(users)
         })
