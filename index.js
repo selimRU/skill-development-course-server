@@ -1,5 +1,6 @@
 require('dotenv').config()
 const express = require('express')
+const jwt = require('jsonwebtoken');
 const cors = require('cors')
 const stripe = require("stripe")(`${process.env.PAYNENT_SECRET_KEY}`)
 const app = express()
@@ -48,6 +49,57 @@ async function run() {
         // payments collections
         const paymentCollections = client.db("skillMindsDB").collection("payment and class")
 
+        // verify token
+        const verifyToken = (req, res, next) => {
+            console.log('headers', req.headers.authorization);
+            if (!req.headers.authorization) {
+                return res.status(401).send({ message: 'Unauthorized' })
+            }
+            const token = req.headers.authorization.split(' ')[1]
+            console.log(token);
+            jwt.verify(token, process.env.ACCESS_TOKEN, (err, decoded) => {
+                if (err) {
+                    return res.status(401).send({ message: 'Unauthorized access' })
+                }
+                req.decoded = decoded
+                next()
+            });
+        }
+
+        // verify admin 
+        const verifyAdmin = async (req, res, next) => {
+            const email = req.decoded.email
+            const query = { email: email }
+            const user = await usersCollections.findOne(query)
+            const isAdmin = user?.role === 'admin'
+            if (!isAdmin) {
+                return res.status(403).send({ message: 'Forbiden access' })
+            }
+            next()
+        }
+
+        // verify teax
+        const verifyTeacher = async (req, res, next) => {
+            const email = req.decoded.email
+            const query = { email: email }
+            const user = await usersCollections.findOne(query)
+            const isTeacher = user?.role === 'teacher'
+            if (!isTeacher) {
+                return res.status(403).send({ message: 'Forbiden access' })
+            }
+            next()
+        }
+
+        app.post('/api/v1/jwt', async (req, res) => {
+            const user = req.body
+            const token = jwt.sign(
+                user,
+                process.env.ACCESS_TOKEN,
+                { expiresIn: '1h' });
+            // console.log('result', result);
+            res.send({ token })
+        })
+
         // courseCount get api
         app.get('/api/v1/courseCount', async (req, res) => {
             const allCourses = await allCoursesCollections.estimatedDocumentCount()
@@ -68,26 +120,26 @@ async function run() {
             res.send({ enroledCount })
         })
 
-        // //single course enrolment count get api
-        // app.get('/api/v1/enrolmentCount/:id', async (req, res) => {
-        //     const id = req.params.id
-        //     const query = { _id: new ObjectId(id) }
-        //     const singleCourseEnroledCount = await paymentCollections.find(query).toArray()
-        //     console.log(singleCourseEnroledCount);
-        //     res.send(singleCourseEnroledCount)
-        // })
-
-        // payment for enrolment history get api
-        app.get('/api/v1/paymentAndCourseInfo/:email', async (req, res) => {
+        //teacher's single course enrolment count get api
+        app.get('/api/v1/singleCourseEnrolmentCount/:email', async (req, res) => {
             const email = req.params.email
             const query = { email: email }
+            const singleCourseEnroledCount = await paymentCollections.find(query).toArray()
+            console.log(singleCourseEnroledCount);
+            res.send(singleCourseEnroledCount)
+        })
+
+        // payment for enrolment history get api
+        app.get('/api/v1/paymentAndCourseInfo/:email', verifyToken, async (req, res) => {
+            const email = req.params.email
+            const query = { student_email: email }
             const payments = await paymentCollections.findOne(query)
             console.log('payyyyy', payments);
             res.send({ payments })
         })
 
         // payment history details get api
-        app.get('/api/v1/paymentAndCourse/details/:id', async (req, res) => {
+        app.get('/api/v1/paymentAndCourse/details/:id', verifyToken, async (req, res) => {
             const paymentsDetails = await paymentCollections.findOne()
             console.log(paymentsDetails);
             res.send({ payments })
@@ -95,13 +147,17 @@ async function run() {
 
         // course get api
         app.get('/api/v1/allCourses', async (req, res) => {
+            const filter = req.query
+            const query = {
+                name: { $regex: filter.search, $options: 'i' }
+            }
             const page = parseInt(req.query.page)
             const size = parseInt(req.query.size)
-            const allCourses = await allCoursesCollections.find()
+            const allCourses = await allCoursesCollections.find(query)
                 .skip(page * size)
                 .limit(size)
                 .toArray()
-            // console.log(allCourses);
+            console.log(allCourses);
             res.send(allCourses)
         })
 
@@ -113,7 +169,7 @@ async function run() {
         // })
 
         // teacher request get api
-        app.get('/api/v1/teacherRequest/:email', async (req, res) => {
+        app.get('/api/v1/teacherRequest/:email', verifyToken, async (req, res) => {
             const email = req.params.email
             const query = { email: email }
             const myRequest = await teacherRequestCollections.findOne(query)
@@ -122,7 +178,7 @@ async function run() {
         })
 
         // teacher request get api
-        app.get('/api/v1/teacherRequest', async (req, res) => {
+        app.get('/api/v1/teacherRequest', verifyToken, verifyAdmin, async (req, res) => {
             const page = parseInt(req.query.page)
             const size = parseInt(req.query.size)
             const allRequest = await teacherRequestCollections.find()
@@ -150,15 +206,15 @@ async function run() {
         })
 
         // users get api
-        app.get('/api/v1/getUsers', async (req, res) => {
-            // const search = req.query.search;
-            // // Check if a name is provided in the query parameters
-            // if (req.query.email) {
-            //     filter.email = { $regex: new RegExp(req.query.name, 'i') }; // Case-insensitive regex for partial matching
-            // }
+        app.get('/api/v1/getUsers', verifyToken, verifyAdmin, async (req, res) => {
+            const filter = req.query;
+            // Check if a name is provided in the query parameters
+            const query = {
+                name: { $regex: filter.search, $options: 'i' }
+            } // Case-insensitive regex for partial matching
             const page = parseInt(req.query.page)
             const size = parseInt(req.query.size)
-            const users = await usersCollections.find()
+            const users = await usersCollections.find(query)
                 .skip(page * size)
                 .limit(size)
                 .toArray()
@@ -175,15 +231,14 @@ async function run() {
 
         // admin get api
         app.get('/api/v1/getUsers/admin/:email', async (req, res) => {
-            const email = req.params.email
-            const query = { email: email }
-            const user = await usersCollections.findOne(query)
-            let admin = false
-            if (user) {
-                admin = user?.role === 'admin'
-            }
-            // console.log(admin);
-            res.send({ admin })
+            const email = req.params.email;
+            // if (req.decoded.email !== email) {
+            //     res.send({ admin: false });
+            // }
+            const query = { email: email };
+            const user = await usersCollections.findOne(query);
+            const result = { admin: user?.role === 'admin' };
+            res.send(result)
         })
 
         // admin get api
@@ -194,8 +249,16 @@ async function run() {
             res.send(result)
         })
 
+        // single course by email get api
+        app.get('/api/v1/getCourse/:email', async (req, res) => {
+            const email = req.params.email
+            const query = { email: email }
+            const result = await allCoursesCollections.findOne(query)
+            res.send({ result })
+        })
+
         // course deletet api
-        app.delete('/api/v1/deleteCourse/:id', async (req, res) => {
+        app.delete('/api/v1/deleteCourse/:id', verifyToken, async (req, res) => {
             const id = req.params.id
             const query = { _id: new ObjectId(id) }
             const result = await allCoursesCollections.deleteOne(query)
@@ -203,7 +266,7 @@ async function run() {
         })
 
         // teacher's course update api
-        app.patch('/api/v1/updateCourse/:id', async (req, res) => {
+        app.patch('/api/v1/updateCourse/:id', verifyToken, async (req, res) => {
             const id = req.params.id
             const filter = { _id: new ObjectId(id) }
             const course = req.body
@@ -222,7 +285,7 @@ async function run() {
         })
 
         // users profile get api
-        app.get('/api/v1/getUser/profile/:email', async (req, res) => {
+        app.get('/api/v1/getUser/profile/:email', verifyToken, async (req, res) => {
             const email = req.params.email
             const query = { email: email }
             const user = await usersCollections.findOne(query)
@@ -267,7 +330,7 @@ async function run() {
         })
 
         // update admin api 
-        app.patch('/api/v1/makeAdmin/:id', async (req, res) => {
+        app.patch('/api/v1/makeAdmin/:id', verifyToken, verifyAdmin, async (req, res) => {
             const id = req.params.id
             const filter = { _id: new ObjectId(id) }
             const updatedDoc = {
@@ -281,7 +344,7 @@ async function run() {
         })
 
         // update course by admin rejected api 
-        app.patch('/api/v1/courseRejected/:id', async (req, res) => {
+        app.patch('/api/v1/courseRejected/:id', verifyToken, verifyAdmin, async (req, res) => {
             const id = req.params.id
             const filter = { _id: new ObjectId(id) }
             const updatedDoc = {
@@ -295,7 +358,7 @@ async function run() {
         })
 
         // update course by admin accepted api 
-        app.patch('/api/v1/courseAccepted/:id', async (req, res) => {
+        app.patch('/api/v1/courseAccepted/:id', verifyToken, verifyAdmin, async (req, res) => {
             const id = req.params.id
             const filter = { _id: new ObjectId(id) }
             const updatedDoc = {
@@ -309,7 +372,7 @@ async function run() {
         })
 
         // update as teacher accepted api
-        app.patch('/api/v1/requestAccepted/:email', async (req, res) => {
+        app.patch('/api/v1/requestAccepted/:email', verifyToken, verifyAdmin, async (req, res) => {
             const email = req.params.email
 
             const filter = { email: email }
@@ -333,7 +396,7 @@ async function run() {
         })
 
         // update as teacher rejected api
-        app.patch('/api/v1/requestRejected/:id', async (req, res) => {
+        app.patch('/api/v1/requestRejected/:id', verifyToken, verifyAdmin, async (req, res) => {
             const id = req.params.id
             const filter = { _id: new ObjectId(id) }
             const updatedDoc = {
@@ -346,7 +409,7 @@ async function run() {
             res.send(result)
         })
 
-        app.post("/create-payment-intent", async (req, res) => {
+        app.post("/create-payment-intent", verifyToken, async (req, res) => {
             const { price } = req.body;
 
             // Create a PaymentIntent with the order amount and currency
@@ -363,7 +426,7 @@ async function run() {
         });
 
         // pament history
-        app.post("/api/v1/payment", async (req, res) => {
+        app.post("/api/v1/payment", verifyToken, async (req, res) => {
             const payment = req.body;
             const paymentResult = await paymentCollections.insertOne(payment)
             // console.log(paymentResult);
