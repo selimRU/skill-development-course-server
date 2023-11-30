@@ -1,6 +1,6 @@
 require('dotenv').config()
-const express = require('express')
 const jwt = require('jsonwebtoken');
+const express = require('express')
 const cors = require('cors')
 const stripe = require("stripe")(`${process.env.PAYNENT_SECRET_KEY}`)
 const app = express()
@@ -14,6 +14,15 @@ app.get('/', (req, res) => {
 
 
 // middleware
+// const corsOptions = {
+//     origin: [
+//         'http://localhost:5173',
+//         'http://localhost:5174',
+//         'https://magical-mermaid-3a2ff4.netlify.app'
+//     ],
+//     credentials: true,
+//     optionSuccessStatus: 200,
+// }
 app.use(cors())
 app.use(express.json())
 
@@ -49,14 +58,17 @@ async function run() {
         // payments collections
         const paymentCollections = client.db("skillMindsDB").collection("payment and class")
 
+        // payments collections
+        const assignmentCollections = client.db("skillMindsDB").collection("assignments")
+
         // verify token
         const verifyToken = (req, res, next) => {
-            console.log('headers', req.headers.authorization);
+            // console.log('headers', req.headers.authorization);
             if (!req.headers.authorization) {
                 return res.status(401).send({ message: 'Unauthorized' })
             }
             const token = req.headers.authorization.split(' ')[1]
-            console.log(token);
+            // console.log(token);
             jwt.verify(token, process.env.ACCESS_TOKEN, (err, decoded) => {
                 if (err) {
                     return res.status(401).send({ message: 'Unauthorized access' })
@@ -90,6 +102,7 @@ async function run() {
             next()
         }
 
+        // jwt post api
         app.post('/api/v1/jwt', async (req, res) => {
             const user = req.body
             const token = jwt.sign(
@@ -120,6 +133,33 @@ async function run() {
             res.send({ enroledCount })
         })
 
+        // // enrolment using aggregation get api
+        // app.get('/api/v1/enrolmentCountBysingleCourse', async (req, res) => {
+        //     const enroledCount = await paymentCollections.aggregate([
+        //         {
+        //             $unwind: "$course_id"  // Unwind the array created by the $lookup stage
+        //         },
+        //         {
+        //             $lookup: {
+        //                 from: "courses",  // Name of the second collection (carts)
+        //                 localField: "course_id",  // Field from the first collection (products)
+        //                 foreignField: "_id",  // Field from the second collection (carts)
+        //                 as: "enroledCourse"  // Alias for the joined data
+        //             }
+        //         },
+        //         {
+        //             $unwind: "$enroledCourse"  // Unwind the array created by the $lookup stage
+        //         },
+        //         {
+        //             $group: {
+        //                 _id: "$enroledCourse.title",  // Group by product ID
+        //                 countInCart: { $sum: 1 }  // Count occurrences in the cart
+        //             }
+        //         }
+        //     ]).toArray()
+        //     res.send(enroledCount)
+        // })
+
         //teacher's single course enrolment count get api
         app.get('/api/v1/singleCourseEnrolmentCount/:email', async (req, res) => {
             const email = req.params.email
@@ -133,9 +173,9 @@ async function run() {
         app.get('/api/v1/paymentAndCourseInfo/:email', verifyToken, async (req, res) => {
             const email = req.params.email
             const query = { student_email: email }
-            const payments = await paymentCollections.findOne(query)
+            const payments = await paymentCollections.find(query).toArray()
             console.log('payyyyy', payments);
-            res.send({ payments })
+            res.send(payments)
         })
 
         // payment history details get api
@@ -149,7 +189,7 @@ async function run() {
         app.get('/api/v1/allCourses', async (req, res) => {
             const filter = req.query
             const query = {
-                name: { $regex: filter.search, $options: 'i' }
+                name: { $regex: filter.search || '', $options: 'i' }
             }
             const page = parseInt(req.query.page)
             const size = parseInt(req.query.size)
@@ -160,13 +200,6 @@ async function run() {
             console.log(allCourses);
             res.send(allCourses)
         })
-
-        // // course get api
-        // app.get('/api/v1/allCourses', async (req, res) => {
-        //     const allCourses = await allCoursesCollections.find().toArray()
-        //     // console.log(allCourses);
-        //     res.send(allCourses)
-        // })
 
         // teacher request get api
         app.get('/api/v1/teacherRequest/:email', verifyToken, async (req, res) => {
@@ -198,9 +231,25 @@ async function run() {
             res.send([course])
         })
 
+        // reviews count get api
+        app.get('/api/v1/reviewsCount', async (req, res) => {
+            const reviews = await reviewsCollections.estimatedDocumentCount()
+            console.log(reviews)
+            res.send({ reviews })
+        })
+
         // reviews get api
         app.get('/api/v1/reviews', async (req, res) => {
-            const reviews = await reviewsCollections.find().toArray()
+            const filter = req.query
+            const query = {
+                name: { $regex: filter.search || '', $options: 'i' }
+            }
+            const page = parseInt(req.query.page)
+            const size = parseInt(req.query.size)
+            const reviews = await reviewsCollections.find(query)
+                .skip(page * size)
+                .limit(size)
+                .toArray()
             // console.log(reviews);
             res.send(reviews)
         })
@@ -210,7 +259,7 @@ async function run() {
             const filter = req.query;
             // Check if a name is provided in the query parameters
             const query = {
-                name: { $regex: filter.search, $options: 'i' }
+                name: { $regex: filter.search || '', $options: 'i' }
             } // Case-insensitive regex for partial matching
             const page = parseInt(req.query.page)
             const size = parseInt(req.query.size)
@@ -225,16 +274,12 @@ async function run() {
         // users get api
         app.get('/api/v1/getUsers/count', async (req, res) => {
             const usersCount = await usersCollections.estimatedDocumentCount()
-            const couresCount = await allCoursesCollections.estimatedDocumentCount()
-            res.send({ usersCount, couresCount })
+            res.send({ usersCount })
         })
 
         // admin get api
         app.get('/api/v1/getUsers/admin/:email', async (req, res) => {
             const email = req.params.email;
-            // if (req.decoded.email !== email) {
-            //     res.send({ admin: false });
-            // }
             const query = { email: email };
             const user = await usersCollections.findOne(query);
             const result = { admin: user?.role === 'admin' };
@@ -266,13 +311,12 @@ async function run() {
         })
 
         // teacher's course update api
-        app.patch('/api/v1/updateCourse/:id', verifyToken, async (req, res) => {
+        app.patch('/api/v1/updateCourse/:id', async (req, res) => {
             const id = req.params.id
             const filter = { _id: new ObjectId(id) }
             const course = req.body
             const updatedCourse = {
                 $set: {
-                    email: course.email,
                     image: course.image,
                     title: course.title,
                     email: course.email,
@@ -322,10 +366,53 @@ async function run() {
         })
 
         // add course post api
-        app.post('/api/v1/addCourse', async (req, res) => {
+        app.post('/api/v1/addCourse', verifyToken, async (req, res) => {
             const user = req.body
             const result = await allCoursesCollections.insertOne(user)
             // console.log(result);
+            res.send(result)
+        })
+
+        // get assignment by title  api
+        app.get('/api/v1/assignmentCounByTitle/:title', async (req, res) => {
+            const title = req.params.title
+            const query = { title: title }
+            const result = await assignmentCollections.findOne(query)
+            console.log(result);
+            res.send(result)
+        })
+
+        // count assignment  api
+        app.get('/api/v1/assignmentCount', async (req, res) => {
+            // const title = req.params.title
+            // const query = { title: title }
+            const result = await assignmentCollections.estimatedDocumentCount()
+            console.log(result);
+            res.send({ result })
+        })
+
+        // get assignment by title api
+        app.get('/api/v1/getAssignmentByTitle/:title', async (req, res) => {
+            const title = req.params.title
+            const query = { title: title }
+            const result = await allCoursesCollections.findOne(query)
+            console.log(result);
+            res.send({ result })
+        })
+
+        // add assignment feedback post api
+        app.post('/api/v1/assignmentFeedback/Create', async (req, res) => {
+            const feedback = req.body
+            const result = await reviewsCollections.insertOne(feedback)
+            console.log(result);
+            res.send(result)
+        })
+
+        // add assignment post api
+        app.post('/api/v1/addAssignment', async (req, res) => {
+            const assignment = req.body
+            const result = await assignmentCollections.insertOne(assignment)
+            console.log(result);
             res.send(result)
         })
 
@@ -409,7 +496,7 @@ async function run() {
             res.send(result)
         })
 
-        app.post("/create-payment-intent", verifyToken, async (req, res) => {
+        app.post("/create-payment-intent", async (req, res) => {
             const { price } = req.body;
 
             // Create a PaymentIntent with the order amount and currency
@@ -433,8 +520,8 @@ async function run() {
             res.send({ paymentResult });
         });
 
-        await client.db("admin").command({ ping: 1 });
-        console.log("Pinged your deployment. You successfully connected to MongoDB!");
+        // await client.db("admin").command({ ping: 1 });
+        // console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
 
         // await client.close();
